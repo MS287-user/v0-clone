@@ -1,5 +1,11 @@
 import { inngest } from "./client";
-import { gemini, createAgent, createTool, createNetwork, createState } from "@inngest/agent-kit";
+import {
+  gemini,
+  createAgent,
+  createTool,
+  createNetwork,
+  createState,
+} from "@inngest/agent-kit";
 import Sandbox from "@e2b/code-interpreter";
 import z from "zod";
 import { FRAGMENT_TITLE_PROMPT, PROMPT, RESPONSE_PROMPT } from "@/prompt";
@@ -11,10 +17,9 @@ export const codeAgentFunction = inngest.createFunction(
   { id: "code-agent" },
   { event: "code-agent/run" },
   async ({ event, step }) => {
-
     const sandboxId = await step.run("get-sandbox-id", async () => {
       const sandbox = await Sandbox.create("v0-clone-nextjs-build");
-      return sandbox.sandboxId
+      return sandbox.sandboxId;
     });
 
     const previousMessages = await step.run(
@@ -24,8 +29,8 @@ export const codeAgentFunction = inngest.createFunction(
 
         const messages = await db.message.findMany({
           where: {
-            projectId: event.data.projectId
-          }
+            projectId: event.data.projectId,
+          },
         });
 
         for (const message of messages) {
@@ -37,17 +42,17 @@ export const codeAgentFunction = inngest.createFunction(
         }
 
         return formattedMessages;
-      }
+      },
     );
 
     const state = createState(
       {
         summary: "",
-        files: {}
+        files: {},
       },
       {
-        messages: previousMessages
-      }
+        messages: previousMessages,
+      },
     );
 
     const codeAgent = createAgent({
@@ -65,31 +70,30 @@ export const codeAgentFunction = inngest.createFunction(
           }),
           handler: async ({ command }, { step }) => {
             return await step?.run("terminal", async () => {
-              const buffers = { stdout: "", stderr: "" }
+              const buffers = { stdout: "", stderr: "" };
 
               try {
                 const sandbox = await Sandbox.connect(sandboxId);
 
                 const result = await sandbox.commands.run(command, {
                   onStdout: (data) => {
-                    buffers.stdout += data
+                    buffers.stdout += data;
                   },
                   onStderr: (data) => {
-                    buffers.stderr += data
-                  }
+                    buffers.stderr += data;
+                  },
                 });
 
                 return result.stdout;
-
               } catch (error) {
                 console.log(
-                  `Command failed: ${error} \n stdout: ${buffers.stdout}\n stderr: ${buffers.stderr}`
+                  `Command failed: ${error} \n stdout: ${buffers.stdout}\n stderr: ${buffers.stderr}`,
                 );
 
                 return `Command failed: ${error} \n stdout: ${buffers.stdout}\n stderr: ${buffers.stderr}`;
               }
-            })
-          }
+            });
+          },
         }),
 
         // 2. createOrUpdateFiles
@@ -117,17 +121,15 @@ export const codeAgentFunction = inngest.createFunction(
                   }
 
                   return updatedFiles;
-
                 } catch (error) {
                   return "Error" + error;
                 }
-              }
-            )
+              },
+            );
 
             if (typeof newFiles === "object") {
               network.state.data.files = newFiles;
             }
-
           },
         }),
 
@@ -147,21 +149,21 @@ export const codeAgentFunction = inngest.createFunction(
 
                 for (const file of files) {
                   const content = await sandbox.files.read(file);
-                  contents.push({ path: file, content })
+                  contents.push({ path: file, content });
                 }
 
                 return JSON.stringify(contents);
-
               } catch (error) {
                 return "Error" + error;
               }
             });
           },
-        })
+        }),
       ],
       lifecycle: {
         onResponse: async ({ result, network }) => {
-          const lastAssistantMessageText = lastAssistantTextMessageContent(result);
+          const lastAssistantMessageText =
+            lastAssistantTextMessageContent(result);
 
           if (lastAssistantMessageText && network) {
             if (lastAssistantMessageText.includes("<task_summary>")) {
@@ -183,12 +185,12 @@ export const codeAgentFunction = inngest.createFunction(
         const summary = network.state.data.summary;
 
         if (summary) {
-          return
+          return;
         }
 
         return codeAgent;
       },
-    })
+    });
 
     const result = await network.run(event.data.value, { state });
 
@@ -206,9 +208,13 @@ export const codeAgentFunction = inngest.createFunction(
       model: gemini({ model: "gemini-2.5-flash" }),
     });
 
-    const { output: fragmentTitleOutput } = await fragmentTitleGenerator.run(result.state.data.summary);
+    const { output: fragmentTitleOutput } = await fragmentTitleGenerator.run(
+      result.state.data.summary,
+    );
 
-    const { output: responseOutput } = await responseGenerator.run(result.state.data.summary);
+    const { output: responseOutput } = await responseGenerator.run(
+      result.state.data.summary,
+    );
 
     const generateFragmentTitle = () => {
       if (fragmentTitleOutput[0].type !== "text") {
@@ -234,14 +240,16 @@ export const codeAgentFunction = inngest.createFunction(
       }
     };
 
-    const isError = !result.state.data.summary || Object.keys(result.state.data.files || {}).length === 0;
+    const isError =
+      !result.state.data.summary ||
+      Object.keys(result.state.data.files || {}).length === 0;
 
     const sandboxUrl = await step.run("get-sandbox-url", async () => {
       const sandbox = await Sandbox.connect(sandboxId);
       const host = sandbox.getHost(3000);
 
-      return `http://${host}`
-    })
+      return `https://${host}`;
+    });
 
     await step.run("save-result", async () => {
       if (isError) {
@@ -251,8 +259,8 @@ export const codeAgentFunction = inngest.createFunction(
             content: "Something went wrong. Please try again",
             role: MessageRole.ASSISTANT,
             type: MessageType.ERROR,
-          }
-        })
+          },
+        });
       }
 
       return await db.message.create({
@@ -266,17 +274,17 @@ export const codeAgentFunction = inngest.createFunction(
               sandboxUrl: sandboxUrl,
               title: generateFragmentTitle(),
               files: result.state.data.files,
-            }
-          }
-        }
-      })
-    })
+            },
+          },
+        },
+      });
+    });
 
     return {
       url: sandboxUrl,
       title: "Untitled",
       files: result.state.data.files,
       summary: result.state.data.summary,
-    }
+    };
   },
 );
